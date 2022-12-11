@@ -1,11 +1,15 @@
 import sys
 import logging
 import os
+import json
 import time
 
 import requests
 import telegram
+
 from dotenv import load_dotenv
+from http import HTTPStatus
+
 
 load_dotenv()
 
@@ -60,44 +64,44 @@ def get_api_answer(timestamp):
     except requests.RequestException as e:
         logger.critical(f'При обработке возникла не однозначная ситуация{e}')
 
-    if response.status_code != 200:
-        assert logger.debug("Отсутствует переменная(-ные) окружения")
+    if response.status_code != HTTPStatus.OK:
+        raise logger.debug("Отсутствует переменная(-ные) окружения")
 
-    if response is not None:
+    try:
         return response.json()
+    except json.decoder.JSONDecodeError:
+        logger.debug('не возвращает json')
 
 
 def check_response(response):
     """проверяет ответ API на соответствие документации."""
-    try:
-        homework = response['homeworks']
-    except KeyError:
-        logger.error('В ответе нет ключа')
-        raise KeyError('В ответе нет ключа')
-
-    if type(response) is not dict:
+    if not isinstance(response, dict):
         logger.error('структура данных не соответствует ожиданиям')
         raise TypeError('Не словарь')
-    if type(response['homeworks']) is not list:
+    homeworks = response.get('homeworks')
+    if 'homeworks' not in response:
+        logger.error('В ответе нет ключа')
+        raise KeyError('В ответе нет ключа')
+    if not isinstance(homeworks, list):
         logger.error('данные приходят не в виде списка.')
         raise TypeError('Не список')
-    return homework[0]
+    return homeworks
 
 
 def parse_status(homework):
     """извлекает из информации о конкретной.
     домашней работе статус этой работы
     """
-    try:
-        homework_name = homework['homework_name']
-    except KeyError as e:
-        logger.error(f'Нет имени домашней работы {e}')
-    try:
-        homework_status = homework['status']
-    except KeyError as e:
-        logger.error(f'Нет статуса {e}')
+    homework_name = homework.get('homework_name')
+    if not homework_name:
+        logger.error('Нет имени домашней работы')
+        raise KeyError('Нет имени домашней работы')
+    homework_status = homework.get('status')
+    if not homework_status:
+        logger.error('Нет статуса работы')
+        raise KeyError('Нет статуса работы')
     if homework_status not in HOMEWORK_VERDICTS:
-        assert logger.error(
+        raise logger.error(
             'Пустой или незнакомый статус домашней работы')
     verdict = HOMEWORK_VERDICTS[homework_status]
     logger.info('Изменился статус проверки работы')
@@ -106,27 +110,32 @@ def parse_status(homework):
 
 def main():
     """Основная логика работы бота."""
+    DELTA_TIME: int = 600000
     if not check_tokens():
         logger.critical("Отсутствует переменная(-ные) окружения")
         sys.exit("Отсутствует переменная(-ные) окружения")
-    TMP_STATUS = 'reviewing'
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
+    current_timestamp = timestamp - DELTA_TIME
 
     while True:
         try:
-            response = get_api_answer(timestamp)
-            homework = check_response(response)
-            if TMP_STATUS != homework['status']:
+            response = get_api_answer(current_timestamp)
+            homeworks = check_response(response)
+            homework = homeworks[0]
+            if not homework:
+                logger.debug('нет обнаружено работы')
+            else:
                 message = parse_status(homework)
                 send_message(bot, message)
-                TMP_STATUS = homework['status']
-            logger.debug('Изменений нет? ждем 10 минут')
-            time.sleep(RETRY_PERIOD)
+            current_timestamp = response.get('current_date')
 
         except Exception as error:
             message = str(f'Сбой в работе программы {error}')
-            logger.critical(message)
+            send_message(bot, message)
+            logger.debug(message)
+
+        finally:
             time.sleep(RETRY_PERIOD)
 
 
