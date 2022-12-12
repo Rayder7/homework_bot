@@ -62,15 +62,21 @@ def get_api_answer(timestamp):
             ENDPOINT, headers=HEADERS,
             params={'from_date': timestamp})
     except requests.RequestException as e:
-        logger.critical(f'При обработке возникла не однозначная ситуация{e}')
+        txt_ex = f'При обработке возникла не однозначная ситуация{e}'
+        logger.critical(txt_ex)
+        raise Exception(txt_ex)
 
     if response.status_code != HTTPStatus.OK:
-        raise logger.debug("Отсутствует переменная(-ные) окружения")
+        txt_ex = "Отсутствует переменная(-ные) окружения"
+        logger.debug(txt_ex)
+        raise Exception(txt_ex)
 
     try:
         return response.json()
     except json.decoder.JSONDecodeError:
-        logger.debug('не возвращает json')
+        txt_ex = 'не возвращает json'
+        logger.debug(txt_ex)
+        raise json.decoder.JSONDecodeError(txt_ex)
 
 
 def check_response(response):
@@ -79,9 +85,6 @@ def check_response(response):
         logger.error('структура данных не соответствует ожиданиям')
         raise TypeError('Не словарь')
     homeworks = response.get('homeworks')
-    if 'homeworks' not in response:
-        logger.error('В ответе нет ключа')
-        raise KeyError('В ответе нет ключа')
     if not isinstance(homeworks, list):
         logger.error('данные приходят не в виде списка.')
         raise TypeError('Не список')
@@ -93,16 +96,14 @@ def parse_status(homework):
     домашней работе статус этой работы
     """
     homework_name = homework.get('homework_name')
-    if not homework_name:
+    if homework_name is None:
         logger.error('Нет имени домашней работы')
         raise KeyError('Нет имени домашней работы')
     homework_status = homework.get('status')
-    if not homework_status:
-        logger.error('Нет статуса работы')
-        raise KeyError('Нет статуса работы')
     if homework_status not in HOMEWORK_VERDICTS:
-        raise logger.error(
-            'Пустой или незнакомый статус домашней работы')
+        txt_ex = 'Пустой или незнакомый статус домашней работы'
+        logger.error(txt_ex)
+        raise KeyError(txt_ex)
     verdict = HOMEWORK_VERDICTS[homework_status]
     logger.info('Изменился статус проверки работы')
     return f'Изменился статус проверки работы "{homework_name}". {verdict}'
@@ -122,18 +123,24 @@ def main():
         try:
             response = get_api_answer(current_timestamp)
             homeworks = check_response(response)
-            homework = homeworks[0]
-            if not homework:
-                logger.debug('нет обнаружено работы')
-            else:
-                message = parse_status(homework)
-                send_message(bot, message)
-            current_timestamp = response.get('current_date')
+            try:
+                homework = homeworks[0]
+            except KeyError:
+                txt_ex = 'нет обнаружено работы'
+                logger.debug(txt_ex)
+                raise KeyError(txt_ex)
+
+            message = parse_status(homework)
+            send_message(bot, message)
+            current_timestamp = response.get('current_date', current_timestamp)
 
         except Exception as error:
-            message = str(f'Сбой в работе программы {error}')
-            send_message(bot, message)
-            logger.debug(message)
+            message = f'Сбой в работе программы {error}'
+            error = ''
+            if message == error:
+                send_message(bot, message)
+                error = message
+                logger.debug(message)
 
         finally:
             time.sleep(RETRY_PERIOD)
