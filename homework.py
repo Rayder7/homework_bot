@@ -112,9 +112,7 @@ def parse_status(homework):
 def main():
     """Основная логика работы бота."""
     DELTA_TIME: int = 600000
-    last_send = {
-        'error': None,
-    }
+    error_txt = None
     if not check_tokens():
         logger.critical("Отсутствует переменная(-ные) окружения")
         sys.exit("Отсутствует переменная(-ные) окружения")
@@ -126,21 +124,22 @@ def main():
         try:
             response = get_api_answer(current_timestamp)
             homeworks = check_response(response)
-            homework = homeworks[0]
-            if len(homework) == 0:
+            if len(homeworks) == 0:
                 logger.debug('не обнаружено работы')
             else:
+                homework = homeworks[0]
                 message = parse_status(homework)
                 send_message(bot, message)
+                error_txt = None
                 current_timestamp = response.get(
                     'current_date', current_timestamp
                 )
 
         except Exception as error:
             message = f'Сбой в работе программы {error}'
-            if last_send['error'] != message:
+            if error_txt != message:
                 send_message(bot, message)
-                last_send['error'] = message
+                error_txt = message
 
         finally:
             time.sleep(RETRY_PERIOD)
